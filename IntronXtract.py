@@ -221,37 +221,7 @@ def main():
         "-f", "--fasta_file", 
         help="FASTA file for the reference genome"
     )
-    parser.add_argument(
-        "--filter_indel_free", 
-        action="store_true", 
-        help="Extract only introns without insertions or deletions"
-    )
-    parser.add_argument(
-        "--transcriptomic_support", 
-        type=int, 
-        help="Minimum number of metaT reads supporting each intron"
-    )
-    parser.add_argument(
-        "--remove_redundancy", 
-        action="store_true", 
-        help="Remove redundant introns based on position and identity"
-    )
-    parser.add_argument(
-        "--intron_iic", 
-        action="store_true", 
-        help="Add additional iic file"
-    )
-    parser.add_argument(
-        "--duplicate", 
-        action="store_true", 
-        help="Duplicate intron sequences and flanks to have both strands" 
-        "(useful when we don't know the orientation of the read)"
-    )
-    parser.add_argument(
-        "--stats",
-        action="store_true",
-        help="Add metaT and intron statistics"
-    )
+
     args = parser.parse_args()
     try:
         validate_files(args)
