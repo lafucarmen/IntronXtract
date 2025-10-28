@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Output files
+*.gff
+*.iic
+*_stats
+*_correct_structure_reads
+my_test_output*
+*introns
+
+# Install 
+*.egg-info/
+build/
+dist/
+
+# IDEs
+.vscode/
+.idea/

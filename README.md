@@ -1,0 +1,1 @@
+Intronxtract is a bioinformatics tool for extracting intron sequences and their flanking regions directly from BAM or SAM alignment files, enabling the detailed analysis of intron-exon structures and splicing.
