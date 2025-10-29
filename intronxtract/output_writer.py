@@ -2,10 +2,11 @@ import pysam
 import os
 from .stats import group_splice_site
 from .sequence_utils import extract_splice_site
+from .bam_processing import extract_unmapped_region
 
 def write_gff(bam_file, output_file, correct_structures):
     """
-    Generate a GFF file from the BAM file with correct structures.
+    Generate a GFF file from the BAM file with correct structures -> only reads without intron-containing indels in the flanks.
     """
     with pysam.AlignmentFile(bam_file, "rb") as bam, open(output_file, "w") as gff_file:
         gff_file.write("##gff-version 3\n")
@@ -186,3 +187,55 @@ def write_stats_summary(output_file, stats_collector, introns_data_final, bam_fi
                          f"{splice_stats['top3_ss'].replace(' ', '/')}\t"
                          f"{splice_stats['top3_ss_count']}\t"
                          f"{splice_stats['top3_ss_pct']}\n")
+
+
+def write_sl_output(input_bam, output_tsv):
+    """
+    Extracts 5' softclipped regions (potential SL sites) 
+    and writes them to a TSV file.
+    """
+    with open(output_tsv, "w") as softclip_file:
+        softclip_file.write("\t".join([
+            "query_name", "query_length", "query_mapped_start", "query_mapped_end",
+            "reference_name", "ref_start", "ref_end",
+            "percent_identity", "sequence", "alignment_score", "strand"
+        ]) + "\n")
+
+        with pysam.AlignmentFile(input_bam, "rb") as bamfile:
+            for read in bamfile:
+                if read.is_unmapped or read.query_sequence is None:
+                    continue
+                if read.has_tag("SA"):  # exclude any read with SA:Z field
+                    continue
+
+                strand = "-" if read.is_reverse else "+"
+                pid = "NA"
+                score = "NA"
+
+                for tag in read.get_tags():
+                    if tag[0] == "XI":
+                        pid = tag[1]
+                    elif tag[0] == "AS":
+                        score = tag[1]
+
+                trimmed_seq, _, _ = extract_unmapped_region(read)
+
+                if trimmed_seq is None or len(trimmed_seq) < 15:  # 10 softclip + 5 mapped
+                    continue
+
+                query_mapped_start = read.query_alignment_start + 1
+                query_mapped_end = read.query_alignment_end
+
+                softclip_file.write("\t".join(map(str, [
+                    read.query_name,
+                    len(read.query_sequence),
+                    query_mapped_start,  
+                    query_mapped_end,    
+                    read.reference_name,
+                    read.reference_start + 1,
+                    read.reference_end,
+                    pid,
+                    trimmed_seq,
+                    score,
+                    strand
+                ])) + "\n")

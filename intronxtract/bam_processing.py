@@ -1,4 +1,5 @@
 from .sequence_utils import extract_splice_site
+from .sequence_utils import reverse_complement
 
 def count_flank_events(read, ref_range):
     aligned = read.get_aligned_pairs(matches_only=False, with_seq=True, with_cigar=True)
@@ -142,3 +143,25 @@ def extract_flanks_and_intron_sequence(read, n_pos, window_size, reference, stat
         },
         "transcriptomic_support": 1
     }
+
+def extract_unmapped_region(read):
+    """
+    Returns (seq, qstart, qend) for 5' softclipped + 5nt mapped region,
+    only if softclip ≥10 nt and no supplementary alignment.
+    """
+    seq = read.query_sequence
+    cigar = read.cigartuples
+
+    if read.is_reverse:
+        seq = reverse_complement(seq)
+        cigar = cigar[::-1]
+
+    if cigar and cigar[0][0] == 4:  # Soft clip at 5'
+        softclip_len = cigar[0][1]
+        # at least 10nt softclipped
+        if softclip_len >= 10:
+            end = softclip_len + 5
+            trimmed_seq = seq[:end]
+            # Devolvemos 1 y 'end' (1-based) para la secuencia cortada
+            return trimmed_seq, 1, end
+    return None, None, None

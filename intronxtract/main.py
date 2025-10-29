@@ -8,7 +8,8 @@ from .analysis import count_transcriptomic_support, remove_redundant_introns
 from .sequence_utils import duplicate_intron_data
 from .output_writer import (
     write_gff, write_main_fasta_output, write_iic_file, 
-    write_correct_reads_list, write_stats_summary
+    write_correct_reads_list, write_stats_summary,
+    write_sl_output
 )
 
 def create_parser():
@@ -24,6 +25,7 @@ def create_parser():
     parser.add_argument("--intron_iic", action="store_true", help="Add additional iic file")
     parser.add_argument("--duplicate", action="store_true", help="Duplicate intron sequences and flanks to have both strands (useful when we don't know the orientation of the read)")
     parser.add_argument("--stats",action="store_true",help="Add metaT and intron statistics")
+    parser.add_argument("--sl-output", action="store_true", help="Extract 5' softclipped + 5nt mapped region (for trans-splicing SL detection)")
     return parser
 
 def main():
@@ -68,7 +70,7 @@ def main():
 
     print(f"Found {stats.total_introns} total introns ({stats.noindels_introns} passing filters).")
 
-    # 3. Analysis and Filtering
+    # 3. Analysis and filtering
     introns_data = count_transcriptomic_support(introns_data)
 
     if args.remove_redundancy:
@@ -78,7 +80,7 @@ def main():
         stats.noindels_noredundant_metaG = set(i['intron_info']['reference_name'] for i in introns_data)
         print(f"Filtered down to {len(introns_data)} non-redundant introns.")
 
-    # Save final data before support filter (for stats)
+    # Save final data before transcriptomic support filtering (for stats)
     introns_data_final_for_stats = introns_data.copy()
 
     if args.transcriptomic_support:
@@ -106,7 +108,7 @@ def main():
         write_correct_reads_list(correct_reads_output_file, correct_structure_metaT)
         write_gff(args.input_file, gff_output_file, set(correct_structure_metaT))
 
-    # 5. Duplication (optional)
+    # 5. Duplication (optional) -> for iic files since splice sites are not oriented
     if args.duplicate:
         print("Duplicating introns for reverse complement...")
         duplicated_introns = []
@@ -123,6 +125,11 @@ def main():
         iic_output_file = os.path.splitext(args.output_file)[0] + ".iic"
         print(f"Writing IIC file to {iic_output_file}...")
         write_iic_file(iic_output_file, introns_data, args.duplicate)
+
+    if args.sl_output:
+        sl_output_file = os.path.splitext(args.output_file)[0] + "_sl_output.tsv"
+        print(f"Writing SL output to {sl_output_file}...")
+        write_sl_output(args.input_file, sl_output_file)
 
     print("Intron extraction complete.")
     return 0
