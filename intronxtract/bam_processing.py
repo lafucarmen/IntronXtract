@@ -82,6 +82,7 @@ def extract_flanks_and_intron_sequence(read, n_pos, window_size, reference, stat
     intron_start_ref, intron_end_ref, intron_start_query = calculate_intron_position(n_pos, read)
 
     identity = calculate_identity(read)
+    alignment_score = read.get_tag('AS') if read.has_tag('AS') else "NA"
     reference_name = read.reference_name
     intron_sequence = reference.fetch(reference_name, intron_start_ref - 1, intron_end_ref)
     intron_length = len(intron_sequence)
@@ -139,7 +140,8 @@ def extract_flanks_and_intron_sequence(read, n_pos, window_size, reference, stat
             "ups_flank_end": ups_flank_end,
             "intron_start_ref": intron_start_ref,
             "intron_end_ref": intron_end_ref,
-            "intron_start_query": intron_start_query
+            "intron_start_query": intron_start_query,
+            "alignment_score": alignment_score
         },
         "transcriptomic_support": 1
     }

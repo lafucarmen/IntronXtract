@@ -4,60 +4,101 @@ from .stats import group_splice_site
 from .sequence_utils import extract_splice_site
 from .bam_processing import extract_unmapped_region
 
-def write_gff(bam_file, output_file, correct_structures):
+def get_intron_header_attributes(intron_info, transcriptomic_support, intron_label=""):
     """
-    Generate a GFF file from the BAM file with correct structures -> only reads without intron-containing indels in the flanks.
+    Constructs the GFF header attributes for an intron.
     """
+    identity_value = intron_info.get('identity', "NA")
+    if isinstance(identity_value, (int, float)):
+        identity_str = str(round(identity_value, 3))
+    else:
+        identity_str = identity_value
+        
+    as_score = intron_info.get('alignment_score', "NA")
+
+    header_attrs = [
+        f"ID=Intron{intron_label}.{intron_info['query_name']}.{intron_info['intron_start_ref']}_{intron_info['intron_end_ref']}",
+        f"Parent={intron_info['query_name']}",
+        f"RefPos={intron_info['intron_start_ref']}_{intron_info['intron_end_ref']}",
+        f"Alignment={intron_info['orientation_alignment']}",
+        f"Intron_Length={intron_info['intron_length']}",
+        f"I={intron_info.get('insertions', 'NA')}",
+        f"D={intron_info.get('deletions', 'NA')}",
+        f"X={intron_info.get('mismatches', 'NA')}",
+        f"QueryPos={intron_info.get('intron_start_query', 'NA')}",
+        f"Identity={identity_str}", 
+        f"AS={as_score}", 
+        f"Splice_Site={intron_info.get('splice_site', 'NA_NA').replace('-', '_')}",
+        f"Support={transcriptomic_support}"
+    ]
+    return ";".join(header_attrs)
+
+def write_gff(bam_file, output_file, introns_data):
+    introns_lookup = {}
+    for intron in introns_data:
+        info = intron['intron_info']
+        key = (info['query_name'], info['intron_start_ref'])
+        introns_lookup[key] = intron
+
     with pysam.AlignmentFile(bam_file, "rb") as bam, open(output_file, "w") as gff_file:
         gff_file.write("##gff-version 3\n")
 
-        mrna_counter = 0
-
         for read in bam.fetch():
-            if read.query_name not in correct_structures:
-                continue 
+            if read.is_unmapped or read.seq is None:
+                continue
+            if 3 not in [op for op, _ in read.cigartuples]:
+                continue
+            
+            if read.is_supplementary:
+                aln_type = "supp"
+            elif read.is_secondary:
+                aln_type = "secondary"
+            else:
+                aln_type = "primary"
 
-            reference_name = read.reference_name
-            start_ref = read.reference_start + 1 
-            end_ref = read.reference_end
-            strand = "."
+            ref_name = read.reference_name
+            strand = "-" if read.is_reverse else "+"
             parent_id = read.query_name
-            mrna_id_numeric = mrna_counter
-            mrna_counter += 1
-
+            
+            unique_parent_id = f"{parent_id}_{aln_type}"
+            
             gff_file.write(
-                f"{reference_name}\tmetaT_mapping\tmRNA\t{start_ref}\t{end_ref}\t.\t{strand}\t.\tID={mrna_id_numeric};Name={parent_id}\n"
+                f"{ref_name}\tIntronXtract\tmRNA\t{read.reference_start + 1}\t{read.reference_end}\t.\t{strand}\t.\tID={unique_parent_id};Name={parent_id};AlnType={aln_type}\n"
             )
 
+            current_pos = read.reference_start + 1
+            exon_start = current_pos
             exon_positions = []
             intron_positions = []
-            exon_start = None
-            current_pos = start_ref
 
-            for op, length in read.cigar:
-                if op in [0, 2]:  # Match or Deletion (exon)
-                    if exon_start is None:
-                        exon_start = current_pos
+            for op, length in read.cigartuples:
+                if op in [0, 2, 7, 8]: 
                     current_pos += length
-                elif op == 3:  # Intron
-                    if exon_start is not None:
-                        exon_positions.append((exon_start, current_pos - 1))
+                elif op == 3: # Intrón
+                    exon_positions.append((exon_start, current_pos - 1))
                     intron_positions.append((current_pos, current_pos + length - 1))
                     current_pos += length
-                    exon_start = None
+                    exon_start = current_pos
+            exon_positions.append((exon_start, read.reference_end))
 
-            if exon_start is not None:
-                exon_positions.append((exon_start, current_pos - 1))
+            for idx, (i_start, i_end) in enumerate(intron_positions, 1):
+                key = (parent_id, i_start)
+                target = introns_lookup.get(key)
 
-            for intron_start, intron_end in intron_positions:
-                gff_file.write(
-                    f"{reference_name}\tmetaT_mapping\tintron\t{intron_start}\t{intron_end}\t.\t{strand}\t.\tParent={parent_id}\n"
-                )
+                if target:
+                    attributes = get_intron_header_attributes(
+                        target['intron_info'],
+                        target['transcriptomic_support'],
+                        intron_label=f"_intron{idx}"
+                    )
+                else:
+                    as_tag = read.get_tag("AS") if read.has_tag("AS") else "NA"
+                    attributes = f"ID={unique_parent_id}.int{idx};Parent={unique_parent_id};Intron_Length={i_end - i_start + 1};AS={as_tag};AlnType={aln_type}"
 
-            for exon_start, exon_end in exon_positions:
-                gff_file.write(
-                    f"{reference_name}\tmetaT_mapping\texon\t{exon_start}\t{exon_end}\t.\t{strand}\t.\tParent={parent_id}\n"
-                )
+                gff_file.write(f"{ref_name}\tIntronXtract\tintron\t{i_start}\t{i_end}\t.\t{strand}\t.\t{attributes}\n")
+
+            for e_start, e_end in exon_positions:
+                gff_file.write(f"{ref_name}\tIntronXtract\texon\t{e_start}\t{e_end}\t.\t{strand}\t.\tParent={unique_parent_id}\n")
 
 def write_main_fasta_output(output_file, introns_data, duplicate_flag):
     """Writes the main FASTA-like output file."""
@@ -84,6 +125,7 @@ def write_main_fasta_output(output_file, introns_data, duplicate_flag):
                           f"X:{info['mismatches']},"
                           f"QueryPos:{info['intron_start_query']},"
                           f"Identity:{round(info['identity'], 3)},"
+                          f"AS:{info['alignment_score']},"
                           f"Splice_Site:{info['splice_site']},"
                           f"transcriptomic_support:{intron['transcriptomic_support']}\n"
                           )

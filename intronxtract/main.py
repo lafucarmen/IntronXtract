@@ -8,8 +8,7 @@ from .analysis import count_transcriptomic_support, remove_redundant_introns
 from .sequence_utils import duplicate_intron_data
 from .output_writer import (
     write_gff, write_main_fasta_output, write_iic_file, 
-    write_correct_reads_list, write_stats_summary,
-    write_sl_output
+    write_stats_summary, write_sl_output
 )
 
 def create_parser():
@@ -98,15 +97,13 @@ def main():
         print("Writing statistics files...")
         base_output = os.path.splitext(args.output_file)[0]
         stats_output_file = base_output + "_stats"
-        correct_reads_output_file = base_output + "_correct_structure_reads"
-        gff_output_file = base_output + "_correct_intron_exon_structures.gff"
+        gff_output_file = base_output + "_full_intron_exon_structures.gff"
 
         correct_structure_metaT = list(stats.total_spliced_metaT - stats.indels_spliced_metaT)
         bam_filename = os.path.basename(args.input_file)
         
         write_stats_summary(stats_output_file, stats, introns_data_final_for_stats, bam_filename, correct_structure_metaT)
-        write_correct_reads_list(correct_reads_output_file, correct_structure_metaT)
-        write_gff(args.input_file, gff_output_file, set(correct_structure_metaT))
+        write_gff(args.input_file, gff_output_file, introns_data)
 
     # 5. Duplication (optional) -> for iic files since splice sites are not oriented
     if args.duplicate:
