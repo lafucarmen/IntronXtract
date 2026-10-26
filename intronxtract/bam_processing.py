@@ -47,21 +47,62 @@ def get_alignment_score(read):
     """Return the AS tag of a read, or None if absent."""
     return read.get_tag("AS") if read.has_tag("AS") else None
 
+def _md_mismatch_positions(read):
+    """
+    Return the set of 0-based reference positions that are mismatches according
+    to the MD tag. Works without the read sequence (e.g. secondary alignments
+    written with SEQ='*').
+    """
+    # Reference positions of aligned (M/=/X) columns, in order. MD describes
+    # these columns plus deletions; introns (N) are not part of MD.
+    match_columns = []
+    ref_pos = read.reference_start
+    for op, length in read.cigartuples:
+        if op in (CIGAR_M, CIGAR_EQ, CIGAR_X):
+            match_columns.extend(range(ref_pos, ref_pos + length))
+        if op in REF_CONSUMING:
+            ref_pos += length
+
+    md = read.get_tag("MD")
+    mismatches = set()
+    column = 0
+    i = 0
+    while i < len(md):
+        if md[i].isdigit():
+            j = i
+            while j < len(md) and md[j].isdigit():
+                j += 1
+            column += int(md[i:j])          # matching bases
+            i = j
+        elif md[i] == "^":
+            i += 1
+            while i < len(md) and md[i].isalpha():
+                i += 1                      # deleted reference bases: not match columns
+        else:
+            if column < len(match_columns):
+                mismatches.add(match_columns[column])
+            column += 1                     # one mismatched base
+            i += 1
+    return mismatches
+
 
 def get_aligned_events(read, reference):
     """
     Return a list of (query_pos, ref_pos, cigar_op, is_mismatch) for a read,
     or None if mismatches cannot be determined.
-    If the read has an MD tag, mismatches are taken from it (pysam lower-case
-    convention). Otherwise the read sequence is compared to the reference
-    FASTA, so an MD tag is not required.
+
+    Mismatches come from the MD tag when present (so the read sequence is not
+    needed, e.g. for secondary alignments with SEQ='*'). Without MD, the read
+    sequence is compared to the reference FASTA. Without MD and without
+    sequence, None is returned.
     """
+    pairs = read.get_aligned_pairs(matches_only=False, with_cigar=True)
+
     if read.has_tag("MD"):
+        mismatch_positions = _md_mismatch_positions(read)
         return [
-            (q_pos, r_pos, op, bool(base) and base.islower())
-            for q_pos, r_pos, base, op in read.get_aligned_pairs(
-                matches_only=False, with_seq=True, with_cigar=True
-            )
+            (q_pos, r_pos, op, r_pos in mismatch_positions and op != CIGAR_D)
+            for q_pos, r_pos, op in pairs
         ]
 
     query_seq = read.query_sequence
@@ -71,7 +112,7 @@ def get_aligned_events(read, reference):
     offset = read.reference_start
     ref_seq = reference.fetch(read.reference_name, offset, read.reference_end).upper()
     events = []
-    for q_pos, r_pos, op in read.get_aligned_pairs(matches_only=False, with_cigar=True):
+    for q_pos, r_pos, op in pairs:
         is_mismatch = False
         if q_pos is not None and r_pos is not None:
             if op == CIGAR_X:
@@ -99,7 +140,6 @@ def count_flank_events(events, ref_range):
                 insertions += 1
 
     return {"mismatches": mismatches, "insertions": insertions, "deletions": deletions}
-
 
 def calculate_intron_position(n_pos, read):
     """

@@ -6,21 +6,22 @@ class StatsCollector:
         self.total_introns = 0
         self.noindels_introns = 0
         self.indels_introns = 0
-        self.noindels_nonredundant_introns = 0
-        self.noindels_nonredundant_supported_introns = 0
+        # Filled only if the corresponding step is run (otherwise reported as NA)
+        self.noindels_nonredundant_introns = None
+        self.noindels_nonredundant_supported_introns = None
         
         self.total_metaT = set()
         self.total_spliced_metaT = set()
         self.indels_spliced_metaT = set()
         self.noindels_spliced_metaT = set()
-        self.noindels_noredundant_metaT = set()
-        self.noindels_noredundant_supported_metaT = set()
+        self.noindels_noredundant_metaT = None
+        self.noindels_noredundant_supported_metaT = None
 
         self.total_metaG = set()
         self.total_spliced_metaG = set()
         self.noindels_spliced_metaG = set()
-        self.noindels_noredundant_metaG = set()
-        self.noindels_noredundant_supported_metaG = set()
+        self.noindels_noredundant_metaG = None
+        self.noindels_noredundant_supported_metaG = None
     
     def add_spliced_read(self, read, has_indel=False):
         """Updates counters for a processed intron."""
@@ -37,7 +38,14 @@ class StatsCollector:
             self.noindels_spliced_metaG.add(read.reference_name)
 
 def group_splice_site(splice_sites):
-    """Group splice sites with their reverse complements and count their occurrences."""
+    """
+    Group splice sites with their reverse complement (reads are not stranded)
+    and summarise them.
+
+    Note: AT-AC introns are reported in ``at_ac_count`` and are ALSO included
+    in ``nci_count`` (non-canonical introns), so percentages can add up to
+    more than 100.
+    """
     group_counts = {}
     total_count = len(splice_sites)
     for sequence in splice_sites:
@@ -62,7 +70,7 @@ def group_splice_site(splice_sites):
         else:
             nci_count += count
             
-    # AT-AC also counted as NCI
+    # Re-logic to match original script (AT-AC was also counted as NCI)
     nci_count_corrected = 0
     for group, count in group_counts.items():
         is_canonical = ("GT-AG" in group or "CT-AC" in group) or \
