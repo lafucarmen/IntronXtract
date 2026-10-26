@@ -1,32 +1,43 @@
+"""Writers for all output files."""
+
 import pysam
-import os
+
 from .stats import group_splice_site
 from .sequence_utils import extract_splice_site
-from .bam_processing import extract_unmapped_region
+from .bam_processing import (
+    extract_unmapped_region, keep_alignment, get_identity, get_alignment_score,
+    CIGAR_M, CIGAR_D, CIGAR_N, CIGAR_EQ, CIGAR_X,
+)
 
-def write_gff(bam_file, output_file, correct_structures):
+def open_alignment_file(path, fasta_file=None):
+    """Open a SAM/BAM/CRAM file (format auto-detected)."""
+    return pysam.AlignmentFile(path, reference_filename=fasta_file)
+
+def write_gff(bam_file, output_file, correct_structures, fasta_file=None):
     """
-    Generate a GFF file from the BAM file with correct structures -> only reads without intron-containing indels in the flanks.
+    Write a GFF3 file with the exon/intron structure of the reads whose introns
+    have no indels/mismatches in their flanks. The BAM does not need to be indexed.
     """
-    with pysam.AlignmentFile(bam_file, "rb") as bam, open(output_file, "w") as gff_file:
+    with open_alignment_file(bam_file, fasta_file) as bam, open(output_file, "w") as gff_file:
         gff_file.write("##gff-version 3\n")
-
         mrna_counter = 0
 
-        for read in bam.fetch():
+        for read in bam.fetch(until_eof=True):
             if read.query_name not in correct_structures:
-                continue 
+                continue
+            if not keep_alignment(read):
+                continue
 
             reference_name = read.reference_name
-            start_ref = read.reference_start + 1 
+            start_ref = read.reference_start + 1
             end_ref = read.reference_end
             strand = "."
-            parent_id = read.query_name
-            mrna_id_numeric = mrna_counter
             mrna_counter += 1
+            mrna_id = f"aln{mrna_counter}"
 
             gff_file.write(
-                f"{reference_name}\tmetaT_mapping\tmRNA\t{start_ref}\t{end_ref}\t.\t{strand}\t.\tID={mrna_id_numeric};Name={parent_id}\n"
+                f"{reference_name}\tintronxtract\tmRNA\t{start_ref}\t{end_ref}\t.\t{strand}\t.\t"
+                f"ID={mrna_id};Name={read.query_name}\n"
             )
 
             exon_positions = []
@@ -34,12 +45,12 @@ def write_gff(bam_file, output_file, correct_structures):
             exon_start = None
             current_pos = start_ref
 
-            for op, length in read.cigar:
-                if op in [0, 2]:  # Match or Deletion (exon)
+            for op, length in read.cigartuples:
+                if op in (CIGAR_M, CIGAR_D, CIGAR_EQ, CIGAR_X):  # exon
                     if exon_start is None:
                         exon_start = current_pos
                     current_pos += length
-                elif op == 3:  # Intron
+                elif op == CIGAR_N:  # intron
                     if exon_start is not None:
                         exon_positions.append((exon_start, current_pos - 1))
                     intron_positions.append((current_pos, current_pos + length - 1))
@@ -49,15 +60,21 @@ def write_gff(bam_file, output_file, correct_structures):
             if exon_start is not None:
                 exon_positions.append((exon_start, current_pos - 1))
 
-            for intron_start, intron_end in intron_positions:
+            for n, (exon_start, exon_end) in enumerate(exon_positions, 1):
                 gff_file.write(
-                    f"{reference_name}\tmetaT_mapping\tintron\t{intron_start}\t{intron_end}\t.\t{strand}\t.\tParent={parent_id}\n"
+                    f"{reference_name}\tintronxtract\texon\t{exon_start}\t{exon_end}\t.\t{strand}\t.\t"
+                    f"ID={mrna_id}.exon{n};Parent={mrna_id}\n"
+                )
+            for n, (intron_start, intron_end) in enumerate(intron_positions, 1):
+                gff_file.write(
+                    f"{reference_name}\tintronxtract\tintron\t{intron_start}\t{intron_end}\t.\t{strand}\t.\t"
+                    f"ID={mrna_id}.intron{n};Parent={mrna_id}\n"
                 )
 
-            for exon_start, exon_end in exon_positions:
-                gff_file.write(
-                    f"{reference_name}\tmetaT_mapping\texon\t{exon_start}\t{exon_end}\t.\t{strand}\t.\tParent={parent_id}\n"
-                )
+
+def _format_identity(identity):
+    return "NA" if identity is None else round(identity, 3)
+
 
 def write_main_fasta_output(output_file, introns_data, duplicate_flag):
     """Writes the main FASTA-like output file."""
@@ -83,7 +100,7 @@ def write_main_fasta_output(output_file, introns_data, duplicate_flag):
                           f"D:{info['deletions']},"
                           f"X:{info['mismatches']},"
                           f"QueryPos:{info['intron_start_query']},"
-                          f"Identity:{round(info['identity'], 3)},"
+                          f"Identity:{_format_identity(info['identity'])},"
                           f"Splice_Site:{info['splice_site']},"
                           f"transcriptomic_support:{intron['transcriptomic_support']}\n"
                           )
@@ -121,75 +138,73 @@ def write_iic_file(output_file, introns_data, duplicate_flag):
 def write_correct_reads_list(output_file, correct_reads_list):
     """Writes the list of correct structure read IDs."""
     with open(output_file, "w") as correct_reads_file:
-        correct_reads_file.write("\n".join(correct_reads_list))
+        correct_reads_file.write("\n".join(sorted(correct_reads_list)))
+        if correct_reads_list:
+            correct_reads_file.write("\n")
 
-def write_stats_summary(output_file, stats_collector, introns_data_final, bam_filename, correct_structure_metaT):
-    """Calculates and writes the final statistics summary file."""
+def _count(value):
+    """Size of a set / value of a counter, or NA if that filtering step was not run."""
+    if value is None:
+        return "NA"
+    return len(value) if isinstance(value, set) else value
+
+
+def write_stats_summary(output_file, stats_collector, introns_data_final, alignment_filename,
+                        correct_structure_reads):
+    """
+    Write the run statistics as a two-line TSV (header + values).
+
+    reads      = query sequences (e.g. RNA-seq reads)
+    references = reference sequences (contigs/chromosomes) with alignments
+    clean_flanks = no insertion, deletion or mismatch in the -w flanks
+    Columns of a filtering step that was not requested are NA.
+    """
+    st = stats_collector
+    splice_sites = [extract_splice_site(i["intron_info"]["intron_sequence"]) for i in introns_data_final]
+    ss = group_splice_site(splice_sites)
+
+    columns = [
+        ("alignment_file", alignment_filename),
+        # reads
+        ("reads_total", _count(st.total_metaT)),
+        ("reads_spliced", _count(st.total_spliced_metaT)),
+        ("reads_spliced_clean_flanks", _count(st.noindels_spliced_metaT)),
+        ("reads_after_redundancy_removal", _count(st.noindels_noredundant_metaT)),
+        ("reads_after_min_support", _count(st.noindels_noredundant_supported_metaT)),
+        ("reads_all_introns_clean_flanks", len(correct_structure_reads)),
+        # introns
+        ("introns_total", _count(st.total_introns)),
+        ("introns_clean_flanks", _count(st.noindels_introns)),
+        ("introns_after_redundancy_removal", _count(st.noindels_nonredundant_introns)),
+        ("introns_after_min_support", _count(st.noindels_nonredundant_supported_introns)),
+        # reference sequences
+        ("references_with_alignments", _count(st.total_metaG)),
+        ("references_with_spliced_reads", _count(st.total_spliced_metaG)),
+        ("references_clean_flanks", _count(st.noindels_spliced_metaG)),
+        ("references_after_redundancy_removal", _count(st.noindels_noredundant_metaG)),
+        ("references_after_min_support", _count(st.noindels_noredundant_supported_metaG)),
+        # splice sites (each pooled with its reverse complement)
+        ("gt_ag_count", ss["gt_ag_count"]),
+        ("gc_ag_count", ss["gc_ag_count"]),
+        ("at_ac_count", ss["at_ac_count"]),
+        ("nci_count", ss["nci_count"]),
+        ("gt_ag_pct", ss["gt_ag_pct"]),
+        ("gc_ag_pct", ss["gc_ag_pct"]),
+        ("at_ac_pct", ss["at_ac_pct"]),
+        ("nci_pct", ss["nci_pct"]),
+    ]
+    for n in (1, 2, 3):
+        columns += [
+            (f"top{n}_ss", ss[f"top{n}_ss"].replace(" ", "/")),
+            (f"top{n}_ss_count", ss[f"top{n}_ss_count"]),
+            (f"top{n}_ss_pct", ss[f"top{n}_ss_pct"]),
+        ]
+
     with open(output_file, "w") as stats_file:
-        stats_file.write("bamfile\t"
-                         "total_metaT\t"
-                         "total_spliced_metaT\t"
-                         "spliced_metaT_no_indels\t"
-                         "spliced_metaT_no_indels_non_redundant\t"
-                         "spliced_metaT_no_indels_non_redundant_supported\t"
-                         "total_introns\t"
-                         "introns_no_indels\t"
-                         "introns_no_indels_non_redundant\t"
-                         "introns_no_indels_non_redundant_supported\t"
-                         "metaT_correct_structure\t"
-                         "total_metaG\ttotal_spliced_metaG\t"
-                         "spliced_metaG_no_indels\t"
-                         "spliced_metaG_no_indels_non_redundant\t"
-                         "spliced_metaG_no_indels_non_redundant_supported\t"
-                         "gt_ag_count\t"
-                         "gc_ag_count\t"
-                         "at_ac_count\t"
-                         "nci_count\t"
-                         "gt_ag_pct\t"
-                         "gc_ag_pct\t"
-                         "at_ac_pct\t"
-                         "nci_pct\t"
-                         "top1_ss\t"
-                         "top1_ss_count\t"
-                         "top1_ss_pct\t"
-                         "top2_ss\t"
-                         "top2_ss_count\t"
-                         "top2_ss_pct\t"
-                         "top3_ss\t"
-                         "top3_ss_count\t"
-                         "top3_ss_pct\n")
+        stats_file.write("\t".join(name for name, _ in columns) + "\n")
+        stats_file.write("\t".join(str(value) for _, value in columns) + "\n")
 
-        intron_sequences = [intron["intron_info"]["intron_sequence"] for intron in introns_data_final]
-        splice_sites = [extract_splice_site(seq) for seq in intron_sequences]
-        splice_stats = group_splice_site(splice_sites)
-
-        stats_file.write(f"{bam_filename}\t{len(stats_collector.total_metaT)}\t{len(stats_collector.total_spliced_metaT)}\t"
-                         f"{len(stats_collector.noindels_spliced_metaT)}\t{len(stats_collector.noindels_noredundant_metaT)}\t"
-                         f"{len(stats_collector.noindels_noredundant_supported_metaT)}\t{stats_collector.total_introns}\t"
-                         f"{stats_collector.noindels_introns}\t{stats_collector.noindels_nonredundant_introns}\t"
-                         f"{stats_collector.noindels_nonredundant_supported_introns}\t{len(correct_structure_metaT)}\t"
-                         f"{len(stats_collector.total_metaG)}\t{len(stats_collector.total_spliced_metaG)}\t{len(stats_collector.noindels_spliced_metaG)}\t"
-                         f"{len(stats_collector.noindels_noredundant_metaG)}\t{len(stats_collector.noindels_noredundant_supported_metaG)}\t"
-                         f"{splice_stats['gt_ag_count']}\t"
-                         f"{splice_stats['gc_ag_count']}\t"
-                         f"{splice_stats['at_ac_count']}\t"
-                         f"{splice_stats['nci_count']}\t"
-                         f"{splice_stats['gt_ag_pct']}\t"
-                         f"{splice_stats['gc_ag_pct']}\t"
-                         f"{splice_stats['at_ac_pct']}\t"
-                         f"{splice_stats['nci_pct']}\t"
-                         f"{splice_stats['top1_ss'].replace(' ', '/')}\t"
-                         f"{splice_stats['top1_ss_count']}\t"
-                         f"{splice_stats['top1_ss_pct']}\t"
-                         f"{splice_stats['top2_ss'].replace(' ', '/')}\t"
-                         f"{splice_stats['top2_ss_count']}\t"
-                         f"{splice_stats['top2_ss_pct']}\t"
-                         f"{splice_stats['top3_ss'].replace(' ', '/')}\t"
-                         f"{splice_stats['top3_ss_count']}\t"
-                         f"{splice_stats['top3_ss_pct']}\n")
-
-
-def write_sl_output(input_bam, output_tsv):
+def write_sl_output(input_bam, output_tsv, fasta_file=None, identity_tag="XI"):
     """
     Extracts 5' softclipped regions (potential SL sites) 
     and writes them to a TSV file.
@@ -201,22 +216,20 @@ def write_sl_output(input_bam, output_tsv):
             "percent_identity", "sequence", "alignment_score", "strand"
         ]) + "\n")
 
-        with pysam.AlignmentFile(input_bam, "rb") as bamfile:
-            for read in bamfile:
-                if read.is_unmapped or read.query_sequence is None:
+        with open_alignment_file(input_bam, fasta_file) as bamfile:
+            for read in bamfile.fetch(until_eof=True):
+                if not keep_alignment(read):
+                    continue
+                if read.query_sequence is None:
                     continue
                 if read.has_tag("SA"):  # exclude any read with SA:Z field
                     continue
 
                 strand = "-" if read.is_reverse else "+"
-                pid = "NA"
-                score = "NA"
-
-                for tag in read.get_tags():
-                    if tag[0] == "XI":
-                        pid = tag[1]
-                    elif tag[0] == "AS":
-                        score = tag[1]
+                identity = get_identity(read, identity_tag)
+                pid = "NA" if identity is None else identity
+                score = get_alignment_score(read)
+                score = "NA" if score is None else score
 
                 trimmed_seq, _, _ = extract_unmapped_region(read)
 
