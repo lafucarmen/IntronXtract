@@ -9,7 +9,7 @@ For every intron it reports the coordinates, the splice site, the identity of th
 - [How it works](#how-it-works)
 - [Input requirements](#input-requirements)
 - [Usage](#usage)
-- [Outputs (with examples)](#outputs)
+- [Outputs](#outputs)
 
 ## Installation
 
