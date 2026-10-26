@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "intronxtract"
+dynamic = ["version"]
+description = "Extract intron sequences, flanking regions and alignment events from spliced RNA-seq alignments"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE.md" }
+authors = [{ name = "Carmen Lafuente Sanz", email = "lafucarmen@gmail.com" }]
+keywords = ["bioinformatics", "introns", "splicing", "long reads", "metatranscriptomics", "BAM"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: CEA CNRS Inria Logiciel Libre License, version 2.1 (CeCILL-2.1)",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = ["pysam>=0.21"]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.scripts]
+intronxtract = "intronxtract.main:main"
+
+[project.urls]
+Homepage = "https://github.com/lafucarmen/IntronXtract"
+Issues = "https://github.com/lafucarmen/IntronXtract/issues"
+
+[tool.setuptools]
+packages = ["intronxtract"]
+
+[tool.setuptools.dynamic]
+version = { attr = "intronxtract.__version__" }

@@ -1,0 +1,10 @@
+name: intronxtract
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python>=3.8
+  - pysam>=0.21
+  - pip
+  - pip:
+      - git+https://github.com/lafucarmen/IntronXtract.git
