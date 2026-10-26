@@ -1,40 +1,38 @@
-from Bio.Seq import Seq
+_COMPLEMENT = str.maketrans(
+    "ACGTURYSWKMBDHVNacgturyswkmbdhvn",
+    "TGCAAYRSWMKVHDBNtgcaayrswmkvhdbn",
+)
 
-def extract_splice_site(intron_sequence):
-    donor_splice=intron_sequence[:2].upper()
-    acceptor_splice=intron_sequence[-2:].upper()
-    return f"{donor_splice}-{acceptor_splice}"
 
 def reverse_complement(sequence):
-    """
-    Returns the reverse complement of a DNA sequence.
-    """
-    return str(Seq(sequence).reverse_complement())
+    """Return the reverse complement of a DNA sequence"""
+    return sequence.translate(_COMPLEMENT)[::-1]
+
+
+def extract_splice_site(intron_sequence):
+    """Return the dinucleotide splice site of an intron"""
+    donor_splice = intron_sequence[:2].upper()
+    acceptor_splice = intron_sequence[-2:].upper()
+    return f"{donor_splice}-{acceptor_splice}"
+
 
 def duplicate_intron_data(intron_data):
     """
-    Duplicates an intron's data using the reverse complement of sequences.
+    Return a copy of an intron record on the opposite strand
+    (reverse complement of the intron and swapped/reverse-complemented flanks).
     """
-    # Create a copy of the dictorionary containing intron info
+    info = intron_data["intron_info"]
     duplicated_data = intron_data.copy()
-    
-    # Add a new tag to distinguish the copied intron
-    duplicated_data["intron_info"] = duplicated_data["intron_info"].copy()
+    dup = duplicated_data["intron_info"] = info.copy()
 
-    # Do the reverse complement of intron sequence and flanks
-    duplicated_data["intron_info"]["intron_sequence"] = reverse_complement(intron_data["intron_info"]["intron_sequence"])
-    duplicated_data["intron_info"]["ups_flank"] = reverse_complement(intron_data["intron_info"]["down_flank"])
-    duplicated_data["intron_info"]["down_flank"] = reverse_complement(intron_data["intron_info"]["ups_flank"])
-    duplicated_data["intron_info"]["ups_flank_200"] = reverse_complement(intron_data["intron_info"]["down_flank_200"])
-    duplicated_data["intron_info"]["down_flank_200"] = reverse_complement(intron_data["intron_info"]["ups_flank_200"])
-    
-    # Extract correct splice site
-    duplicated_data["intron_info"]["splice_site"] = extract_splice_site(duplicated_data["intron_info"]["intron_sequence"])
-
-    # Invert the orientation of the alignment
-    duplicated_data["intron_info"]["orientation_alignment"] = (
-        "Reverse" if intron_data["intron_info"]["orientation_alignment"] == "Forward" else "Forward"
+    dup["intron_sequence"] = reverse_complement(info["intron_sequence"])
+    dup["ups_flank"] = reverse_complement(info["down_flank"])
+    dup["down_flank"] = reverse_complement(info["ups_flank"])
+    dup["ups_flank_200"] = reverse_complement(info["down_flank_200"])
+    dup["down_flank_200"] = reverse_complement(info["ups_flank_200"])
+    dup["splice_site"] = extract_splice_site(dup["intron_sequence"])
+    dup["orientation_alignment"] = (
+        "Reverse" if info["orientation_alignment"] == "Forward" else "Forward"
     )
-    duplicated_data['is_duplicate'] = True
-    
+    duplicated_data["is_duplicate"] = True
     return duplicated_data
