@@ -1,4 +1,4 @@
-from Bio.Seq import Seq
+from .sequence_utils import reverse_complement
 
 class StatsCollector:
     """A class to collect statistics during the run."""
@@ -37,11 +37,11 @@ class StatsCollector:
             self.noindels_spliced_metaG.add(read.reference_name)
 
 def group_splice_site(splice_sites):
+    """Group splice sites with their reverse complements and count their occurrences."""
     group_counts = {}
     total_count = len(splice_sites)
     for sequence in splice_sites:
-        seq = Seq(sequence)
-        reverse_comp = str(seq.reverse_complement())
+        reverse_comp = reverse_complement(sequence)
         sorted_group = " ".join(sorted([sequence, reverse_comp]))
         group_counts[sorted_group] = group_counts.get(sorted_group, 0) + 1
 
@@ -62,7 +62,7 @@ def group_splice_site(splice_sites):
         else:
             nci_count += count
             
-    # Re-logic to match original script (AT-AC was also counted as NCI)
+    # AT-AC also counted as NCI
     nci_count_corrected = 0
     for group, count in group_counts.items():
         is_canonical = ("GT-AG" in group or "CT-AC" in group) or \
