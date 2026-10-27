@@ -1,3 +1,5 @@
+<img width="956" height="264" alt="intronxtract_logoX_ink_notag_white" src="https://github.com/user-attachments/assets/34d925b8-6591-439c-95ea-82484a0fc9ea" />
+
 # IntronXtract - Intron Extraction and Analysis
 
 **IntronXtract** is a bioinformatics tool for extracting intron sequences and their exonic flanks from spliced RNA-seq alignments.
