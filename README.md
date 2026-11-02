@@ -1,6 +1,8 @@
 <img width="956" height="264" alt="intronxtract_logoX_ink_notag_white" src="https://github.com/user-attachments/assets/34d925b8-6591-439c-95ea-82484a0fc9ea" />
 
 # IntronXtract - Intron Extraction and Analysis
+[![DOI](https://zenodo.org/badge/965633752.svg)](https://doi.org/10.5281/zenodo.23882798)
+
 
 **IntronXtract** is a bioinformatics tool for extracting intron sequences and their exonic flanks from spliced RNA-seq alignments.
 For every intron it reports the coordinates, the splice site, the identity of the read and the number of mismatches, insertions and deletions in the flanking exons, so that only introns with a reliable exon-intron boundary can be kept. 
